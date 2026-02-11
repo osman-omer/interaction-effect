@@ -57,7 +57,7 @@ The focus is on **methodology and understanding**, not on clinical or predictive
 - Predicted charges by age for smokers vs non-smokers  
 - Coefficient comparison (additive vs interaction model)
 
-  ![predicted charges](plots/predicted_plot.png)
+  ![predicted charges](plots/prediction_plot.png)
 
 ## 📌 Conclusion  
 This project is a **learning exercise** focused on understanding interaction terms in regression:
