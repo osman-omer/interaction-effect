@@ -1,0 +1,337 @@
+---
+title: "Interaction Effects in Regression"
+author: "Osman Omer Mustafa"
+date: "today"
+format:
+  html:
+    toc: true
+    code-fold: true
+    theme: cosmo
+    toc-location: left
+---
+
+## Load required libraries
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(broom)
+```
+
+## Read data
+```{r message=FALSE}
+data <- read_csv("insurance.csv")
+```
+
+## Basic checks
+```{r}
+glimpse(data)
+summary(data)
+sum(is.na(data))
+```
+
+## Ensure categorical variables are factors
+```{r}
+data <- data %>% 
+  mutate(
+    sex = as.factor(sex),
+    smoker = as.factor(smoker),
+    region = as.factor(region)
+  )
+
+glimpse(data)
+```
+
+Categorical variables have been converted to factors for proper regression modeling.
+
+## Exploratory Data Analysis
+
+### Summary statistics by smoker
+```{r}
+summary_smoker <- data %>% 
+  group_by(smoker) %>% 
+  summarise(
+    n = n(),
+    mean_age = mean(age),
+    mean_charges = mean(charges),
+    sd_charges = sd(charges)
+  )
+summary_smoker %>% knitr::kable(caption = "Summary Statistics by Smoker Status")
+```
+
+Non-smokers (n = `r summary_smoker$n[summary_smoker$smoker == "no"]`) have mean charges of $`r format(round(summary_smoker$mean_charges[summary_smoker$smoker == "no"], 0), big.mark = ",")`, 
+while smokers (n = `r summary_smoker$n[summary_smoker$smoker == "yes"]`) have mean charges of $`r format(round(summary_smoker$mean_charges[summary_smoker$smoker == "yes"], 0), big.mark = ",")`.
+
+### Age vs Charges by smoker status
+```{r message=FALSE}
+ggplot(data, aes(x = age, y = charges, color = smoker)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    x = "Age (Years)",
+    y = "Insurance Charges (USD)",
+    title = "Age vs Charges by Smoker Status",
+    color = "Smoker"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+The scatter plot shows two distinct groups with different slopes. 
+Visual inspection suggests the relationship between age and charges may differ by smoking status.
+
+## Model 1: Additive Model (No Interaction)
+
+Fit a model assuming age and smoker have independent, additive effects.
+
+```{r}
+model_additive <- lm(charges ~ age + smoker, data = data)
+```
+
+### Model results
+```{r}
+tidy_additive <- tidy(model_additive, conf.int = TRUE)
+tidy_additive %>% knitr::kable(caption = "Additive Model Coefficients", digits = 2)
+```
+
+In the additive model, age has a coefficient of `r round(tidy_additive$estimate[tidy_additive$term == "age"], 2)` 
+and smoker status has a coefficient of `r format(round(tidy_additive$estimate[tidy_additive$term == "smokeryes"], 0), big.mark = ",")`.
+
+### Model performance
+```{r}
+glance_additive <- glance(model_additive)
+glance_additive %>% knitr::kable(caption = "Additive Model Performance", digits = 4)
+```
+
+The additive model has R² = `r round(glance_additive$r.squared, 3)` and Adjusted R² = `r round(glance_additive$adj.r.squared, 3)`.
+
+## Model 2: Interaction Model
+
+Fit a model including an interaction term to allow the age effect to vary by smoking status.
+
+```{r}
+model_interaction <- lm(charges ~ age * smoker, data = data)
+```
+
+### Model results
+```{r}
+tidy_interaction <- tidy(model_interaction, conf.int = TRUE)
+tidy_interaction %>% knitr::kable(caption = "Interaction Model Coefficients", digits = 2)
+```
+
+The interaction term (age:smokeryes) has a coefficient of `r round(tidy_interaction$estimate[tidy_interaction$term == "age:smokeryes"], 2)` 
+with p-value = `r format.pval(tidy_interaction$p.value[tidy_interaction$term == "age:smokeryes"], eps = 0.001)`.
+
+### Model performance
+```{r}
+glance_interaction <- glance(model_interaction)
+glance_interaction %>% knitr::kable(caption = "Interaction Model Performance", digits = 4)
+```
+
+The interaction model has R² = `r round(glance_interaction$r.squared, 3)` and Adjusted R² = `r round(glance_interaction$adj.r.squared, 3)`.
+
+## Model Comparison
+
+### ANOVA comparison
+```{r}
+anova_compare <- anova(model_additive, model_interaction)
+anova_compare %>% knitr::kable(caption = "ANOVA: Additive vs Interaction", digits = 4)
+```
+
+```{r echo=FALSE}
+anova_pval <- anova_compare$`Pr(>F)`[2]
+anova_significant <- anova_pval < 0.05
+```
+
+The ANOVA F-test yields p = `r format.pval(anova_pval, eps = 0.001)`. 
+`r if(anova_significant) {"This indicates the interaction term significantly improves model fit (p < 0.05)."} else {"This suggests the interaction term does not significantly improve model fit (p ≥ 0.05)."}`
+
+### Information criteria
+```{r}
+aic_compare <- AIC(model_additive, model_interaction)
+aic_compare %>% knitr::kable(caption = "AIC Comparison", digits = 2)
+
+bic_compare <- BIC(model_additive, model_interaction)
+bic_compare %>% knitr::kable(caption = "BIC Comparison", digits = 2)
+```
+
+```{r echo=FALSE}
+aic_diff <- aic_compare$AIC[1] - aic_compare$AIC[2]
+bic_diff <- bic_compare$BIC[1] - bic_compare$BIC[2]
+aic_favors_interaction <- aic_diff > 0
+bic_favors_interaction <- bic_diff > 0
+```
+
+AIC: `r if(aic_favors_interaction) {paste0("Interaction model is lower by ", round(aic_diff, 1), " units, favoring the interaction model.")} else {paste0("Additive model is lower by ", round(abs(aic_diff), 1), " units, favoring the additive model.")}`
+
+BIC: `r if(bic_favors_interaction) {paste0("Interaction model is lower by ", round(bic_diff, 1), " units, favoring the interaction model.")} else {paste0("Additive model is lower by ", round(abs(bic_diff), 1), " units, favoring the additive model.")}`
+
+### R-squared comparison
+```{r}
+r2_comparison <- data.frame(
+  model = c("Additive", "Interaction"),
+  r_squared = c(glance_additive$r.squared, glance_interaction$r.squared),
+  adj_r_squared = c(glance_additive$adj.r.squared, glance_interaction$adj.r.squared)
+)
+r2_comparison %>% knitr::kable(caption = "R-squared Comparison", digits = 4)
+```
+
+The R² improvement from adding the interaction term is `r round((glance_interaction$r.squared - glance_additive$r.squared) * 100, 2)`%.
+
+## Understanding the Interaction
+
+### Extract coefficients
+```{r}
+coefs <- coef(model_interaction)
+coefs %>% 
+  as.data.frame() %>%
+  rownames_to_column("term") %>%
+  rename(estimate = ".") %>%
+  knitr::kable(caption = "Model Coefficients", digits = 2)
+```
+
+### Calculate age effect (slope) for each group
+```{r}
+slope_no <- coefs[2]
+slope_yes <- coefs[2] + coefs[4]
+
+slopes <- data.frame(
+  group = c("Non-smoker", "Smoker"),
+  slope = c(slope_no, slope_yes)
+)
+slopes %>% knitr::kable(caption = "Age Effect by Group", digits = 2)
+```
+
+For non-smokers, each additional year increases charges by $`r round(slope_no, 2)`.
+For smokers, each additional year increases charges by $`r round(slope_yes, 2)`.
+
+### Predicted charges at different ages
+```{r}
+predictions <- data.frame(
+  age = c(20, 40, 60)
+) %>%
+  mutate(
+    non_smoker = coefs[1] + slope_no * age,
+    smoker = (coefs[1] + coefs[3]) + slope_yes * age,
+    difference = smoker - non_smoker
+  )
+
+predictions %>% knitr::kable(caption = "Predicted Charges by Age and Smoker Status", 
+                             digits = 0)
+```
+
+At age 20, the predicted difference is $`r format(round(predictions$difference[predictions$age == 20], 0), big.mark = ",")`.
+At age 60, the predicted difference is $`r format(round(predictions$difference[predictions$age == 60], 0), big.mark = ",")`.
+
+## Interaction Significance
+
+### Test interaction term
+```{r}
+interaction_term <- tidy_interaction %>% 
+  filter(term == "age:smokeryes")
+interaction_term %>% knitr::kable(caption = "Interaction Term Statistics", digits = 4)
+```
+
+```{r echo=FALSE}
+interaction_pval <- interaction_term$p.value
+interaction_significant <- interaction_pval < 0.05
+```
+
+The interaction coefficient is `r round(interaction_term$estimate, 2)` with p-value = `r format.pval(interaction_pval, eps = 0.001)`. 
+`r if(interaction_significant) {"This is statistically significant at α = 0.05, indicating the effect of age on charges differs significantly between smokers and non-smokers."} else {"This is not statistically significant at α = 0.05, suggesting insufficient evidence that the age effect differs between smokers and non-smokers."}`
+
+## Visualization
+
+### Enhanced interaction plot
+```{r message=FALSE}
+ggplot(data, aes(x = age, y = charges, color = smoker)) +
+  geom_point(alpha = 0.4, size = 1.5) +
+  geom_smooth(method = "lm", se = TRUE, linewidth = 1.2) +
+  labs(
+    x = "Age (Years)",
+    y = "Insurance Charges (USD)",
+    title = "Age vs Charges by Smoker Status",
+    color = "Smoker"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+The regression lines show `r if(interaction_significant) {"different slopes"} else {"visually different slopes, though the statistical test suggests this difference may not be significant"}` for the two groups.
+
+### Coefficient comparison
+```{r}
+bind_rows(
+  tidy_additive %>% mutate(model = "Additive"),
+  tidy_interaction %>% mutate(model = "Interaction")
+) %>%
+  filter(term != "(Intercept)") %>%
+  ggplot(aes(x = term, y = estimate, fill = model)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), 
+                position = position_dodge(width = 0.9), width = 0.2) +
+  coord_flip() +
+  labs(
+    x = "Term",
+    y = "Coefficient Estimate",
+    title = "Model Comparison: Additive vs Interaction",
+    fill = "Model"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Predicted charges
+```{r}
+pred_data <- expand.grid(
+  age = seq(18, 64, by = 1),
+  smoker = c("no", "yes")
+)
+
+pred_data$charges <- predict(model_interaction, newdata = pred_data)
+
+ggplot(pred_data, aes(x = age, y = charges, color = smoker)) +
+  geom_line(linewidth = 1.2) +
+  labs(
+    x = "Age (Years)",
+    y = "Predicted Insurance Charges (USD)",
+    title = "Predicted Charges by Age and Smoker Status",
+    color = "Smoker"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+  )
+```
+
+## Conclusion
+
+```{r echo=FALSE}
+# Store key values for conclusion
+r2_additive <- round(glance_additive$r.squared, 3)
+r2_interaction <- round(glance_interaction$r.squared, 3)
+r2_improvement <- round((r2_interaction - r2_additive) * 100, 2)
+```
+
+This analysis examined whether the relationship between age and insurance charges differs by smoking status through interaction modeling.
+
+**Model Performance:** The additive model achieved R² = `r r2_additive`, while the interaction model achieved R² = `r r2_interaction`, representing a `r r2_improvement`% improvement in explained variance.
+
+**Interaction Term:** The age:smoker interaction coefficient was `r round(interaction_term$estimate, 2)` (p = `r format.pval(interaction_pval, eps = 0.001)`). 
+`r if(interaction_significant) {"This statistically significant interaction indicates the effect of age on charges differs between smokers and non-smokers. The positive coefficient suggests age has a stronger effect on smokers' charges."} else {"This interaction term is not statistically significant at the conventional α = 0.05 level, suggesting insufficient evidence to conclude that the age effect differs substantially between smoking groups in the population."}`
+
+**Model Selection:** 
+`r if(anova_significant) {"ANOVA testing favored the interaction model (p < 0.05)."} else {"ANOVA testing did not show significant improvement with the interaction term (p ≥ 0.05)."}`
+`r if(aic_favors_interaction) {"AIC favored the interaction model."} else {"AIC favored the simpler additive model."}`
+`r if(bic_favors_interaction) {"BIC also favored the interaction model."} else {"BIC favored the simpler additive model."}`
+`r if(aic_favors_interaction != bic_favors_interaction) {"The disagreement between AIC and BIC reflects BIC's stronger penalty for model complexity."} else {""}`
+
+**Practical Interpretation:** Based on the fitted interaction model, non-smokers experience an estimated $`r round(slope_no, 2)` increase in charges per year of age, 
+while smokers experience an estimated $`r round(slope_yes, 2)` increase per year. 
+`r if(interaction_significant) {"This difference is statistically significant and suggests that smoking status modifies the age effect."} else {"While the point estimates differ, the statistical test suggests caution in concluding this difference is meaningful beyond sampling variation."}`
+
+**Methodological Note:** `r if(!interaction_significant) {"The lack of statistical significance for the interaction term suggests that, for these data, the simpler additive model may be adequate. The visual appearance of non-parallel lines in the plot does not necessarily imply a statistically significant interaction."} else {"The significant interaction demonstrates the importance of testing for effect modification in regression modeling. Failing to include this interaction would misrepresent how age affects charges across smoking groups."}`
+
+**Limitations:** This analysis assumes linear relationships and does not explore potential nonlinear effects or additional interactions with other variables. 
+The R² values indicate that substantial variance remains unexplained, suggesting other unmeasured factors contribute to insurance charges.
